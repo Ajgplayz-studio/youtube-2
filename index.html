@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>YouTube 2</title>
 <link rel="icon" href="logo.png">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; background: #0f0f0f; color: #f1f1f1; }
@@ -138,6 +140,21 @@
 </div>
 
 <script>
+  // Firebase backend (shared discord-prism project, yt2/ paths)
+  const firebaseConfig = {
+    apiKey: "AIzaSyCywBVhG8iKbmK3K5oz0NBFmIWzopFQ5N0",
+    authDomain: "discord-prism.firebaseapp.com",
+    databaseURL: "https://discord-prism-default-rtdb.firebaseio.com",
+    projectId: "discord-prism",
+    storageBucket: "discord-prism.firebasestorage.app",
+    messagingSenderId: "819453764446",
+    appId: "1:819453764446:web:95f06de84fa69d994165cf",
+    measurementId: "G-8DB05G3V3Y"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+  const videosRef = db.ref('yt2/videos');
+
   const SAMPLES = [
     { title: "Big Buck Bunny", desc: "A giant rabbit takes revenge on three bullying rodents in this classic open-source short film.",
       url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
@@ -150,12 +167,33 @@
       thumb: "https://picsum.photos/seed/steel2/640/360" }
   ];
 
-  function getVideos() {
-    try { return JSON.parse(localStorage.getItem('yt2_videos')) || null; }
-    catch { return null; }
+  let videos = [];
+  let dbReady = false;
+
+  // Seed sample videos the first time the database is empty
+  videosRef.once('value').then(snap => {
+    if (!snap.exists()) {
+      SAMPLES.forEach(v => videosRef.push({ ...v, createdAt: firebase.database.ServerValue.TIMESTAMP }));
+    }
+  }).catch(showDbError);
+
+  // Realtime updates: everyone sees new posts instantly
+  videosRef.orderByChild('createdAt').on('value', snap => {
+    dbReady = true;
+    videos = [];
+    snap.forEach(child => videos.unshift({ id: child.key, ...child.val() }));
+    renderVideos();
+  }, showDbError);
+
+  function showDbError(err) {
+    console.error(err);
+    const grid = document.getElementById('grid');
+    if (!dbReady && !grid.children.length) {
+      document.getElementById('empty').style.display = 'block';
+      document.getElementById('empty').textContent =
+        '⚠️ Could not reach the database. The Firebase rules may need to allow reads/writes on yt2/videos.';
+    }
   }
-  function saveVideos(v) { localStorage.setItem('yt2_videos', JSON.stringify(v)); }
-  if (!getVideos()) saveVideos(SAMPLES);
 
   function esc(s) {
     return String(s || '').replace(/[&<>"']/g, c =>
@@ -164,7 +202,6 @@
 
   function renderVideos() {
     const q = document.getElementById('searchInput').value.toLowerCase();
-    const videos = getVideos() || [];
     const grid = document.getElementById('grid');
     grid.innerHTML = '';
     let shown = 0;
@@ -193,16 +230,14 @@
     const url = document.getElementById('vUrl').value.trim();
     if (!title) { alert('Give your video a title!'); return; }
     if (!url) { alert('Add a video URL (direct mp4 link).'); return; }
-    const videos = getVideos() || [];
-    videos.unshift({
+    videosRef.push({
       title,
       desc: document.getElementById('vDesc').value.trim(),
       url,
-      thumb: document.getElementById('vThumb').value.trim()
-    });
-    saveVideos(videos);
-    closePost();
-    renderVideos();
+      thumb: document.getElementById('vThumb').value.trim(),
+      createdAt: firebase.database.ServerValue.TIMESTAMP
+    }).then(() => { closePost(); })
+      .catch(err => { console.error(err); alert('Could not post — the database may not allow writes yet.'); });
   }
 
   function playVideo(v) {
